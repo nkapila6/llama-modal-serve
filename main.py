@@ -1,3 +1,5 @@
+import os
+
 import modal
 
 APP_NAME = "nemotron-llama-cpp"
@@ -48,6 +50,7 @@ def download_model():
     gpu="A10G",
     timeout=600,
     scaledown_window=300,
+    secrets=[modal.Secret.from_name("llama-api-key")],
 )
 @modal.concurrent(max_inputs=100)
 class LlamaServer:
@@ -57,7 +60,7 @@ class LlamaServer:
         from llama_cpp.server.settings import ModelSettings, ServerSettings
 
         return create_app(
-            server_settings=ServerSettings(),
+            server_settings=ServerSettings(api_key=os.environ["API_KEY"]),
             model_settings=[
                 ModelSettings(
                     model=f"{CACHE_DIR}/{MODEL_FILE}",

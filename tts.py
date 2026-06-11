@@ -85,8 +85,9 @@ class TTSServer:
 
     @modal.asgi_app()
     def serve(self):
+        import numpy as np
         from fastapi import Depends, FastAPI, HTTPException
-        from fastapi.responses import Response
+        from fastapi.responses import Response, StreamingResponse
         from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
         from pydantic import BaseModel
 
@@ -125,6 +126,37 @@ class TTSServer:
             wav = _wav_bytes(audio, sr)
 
             return Response(content=wav, media_type="audio/wav")
+
+        def _wav_header(sample_rate: int) -> bytes:
+            hdr = io.BytesIO()
+            hdr.write(b"RIFF")
+            hdr.write(struct.pack("<I", 0xFFFFFFFF))
+            hdr.write(b"WAVE")
+            hdr.write(b"fmt ")
+            hdr.write(struct.pack("<IHHIIHH", 16, 1, 1, sample_rate,
+                      sample_rate * 2, 2, 16))
+            hdr.write(b"data")
+            hdr.write(struct.pack("<I", 0xFFFFFFFF))
+            return hdr.getvalue()
+
+        def _pcm16(pcm):
+            return np.clip(pcm * 32768, -32768, 32767).astype(np.int16).tobytes()
+
+        @web_app.post("/v1/audio/speech/stream", dependencies=[Depends(verify_key)])
+        async def generate_speech_stream(req: TTSRequest):
+            if not req.text.strip():
+                raise HTTPException(400, "'text' is empty")
+
+            def audio_stream():
+                yield _wav_header(self.sample_rate)
+                for audio, sr, _ in self.model.generate_voice_design_streaming(
+                    text=req.text,
+                    instruct=req.instruct,
+                    language=req.language,
+                ):
+                    yield _pcm16(audio)
+
+            return StreamingResponse(audio_stream(), media_type="audio/wav")
 
         return web_app
 
